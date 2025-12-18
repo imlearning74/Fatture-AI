@@ -2,10 +2,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// SOSTITUISCI 'gestore-fatture' con il nome esatto del tuo repository su GitHub
 export default defineConfig({
   plugins: [react()],
-  base: '/gestore-fatture/', 
+  // Aggiornato con il nome del tuo repository reale rilevato dai log di errore
+  base: '/Fatture-AI/', 
   define: {
     'process.env': {
       API_KEY: process.env.API_KEY,
@@ -14,3 +14,4 @@ export default defineConfig({
     }
   }
 });
+
