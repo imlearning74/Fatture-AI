@@ -1,15 +1,16 @@
 
 import React, { useState } from 'react';
-import { Search, Eye, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Eye, Trash2, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
 import { Invoice } from '../types';
 
 interface InvoiceTableProps {
   invoices: Invoice[];
   onView: (invoice: Invoice) => void;
+  onEdit: (invoice: Invoice) => void;
   onDelete: (id: string) => void;
 }
 
-const InvoiceTable: React.FC<InvoiceTableProps> = ({ invoices, onView, onDelete }) => {
+const InvoiceTable: React.FC<InvoiceTableProps> = ({ invoices, onView, onEdit, onDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<keyof Invoice>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -99,13 +100,20 @@ const InvoiceTable: React.FC<InvoiceTableProps> = ({ invoices, onView, onDelete 
                     {invoice.amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} {invoice.currency}
                   </td>
                   <td className="px-6 py-4 text-sm text-center">
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-center gap-1">
                       <button
                         onClick={() => onView(invoice)}
                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
                         title="Visualizza"
                       >
                         <Eye size={18} />
+                      </button>
+                      <button
+                        onClick={() => onEdit(invoice)}
+                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                        title="Modifica"
+                      >
+                        <Edit3 size={18} />
                       </button>
                       <button
                         onClick={() => onDelete(invoice.id)}
