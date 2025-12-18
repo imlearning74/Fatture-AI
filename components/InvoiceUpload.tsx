@@ -129,9 +129,9 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, exist
     setTimeout(() => onSuccess(newInvoice), 600);
   };
 
+  // Correzione filtro: rimosso l'esclusione del nome esatto per garantire che l'utente veda il match
   const filteredVendorSuggestions = existingVendors.filter(v => 
-    v.toLowerCase().includes(reviewData.vendor.toLowerCase()) && 
-    v.toLowerCase() !== reviewData.vendor.toLowerCase()
+    reviewData.vendor && v.toLowerCase().includes(reviewData.vendor.toLowerCase())
   );
 
   return (
