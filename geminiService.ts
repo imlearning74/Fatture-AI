@@ -4,24 +4,24 @@ import { ExtractionResult } from "./types";
 
 export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionResult | null> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+    // Initialize GoogleGenAI strictly using process.env.API_KEY as per guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: [
-        {
-          parts: [
-            {
-              inlineData: {
-                mimeType: "application/pdf",
-                data: base64Pdf,
-              },
+      // Follow the recommended contents structure with parts as per guidelines
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: base64Pdf,
             },
-            {
-              text: "Analizza questa fattura ed estrai i seguenti dati in formato JSON: numero fattura (invoiceNumber), fornitore (vendor), data della fattura in formato YYYY-MM-DD (date), importo totale numerico (amount), e valuta (currency). Sii preciso.",
-            },
-          ],
-        },
-      ],
+          },
+          {
+            text: "Analizza questa fattura ed estrai i seguenti dati in formato JSON: numero fattura (invoiceNumber), fornitore (vendor), data della fattura in formato YYYY-MM-DD (date), importo totale numerico (amount), e valuta (currency). Sii preciso.",
+          },
+        ],
+      },
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -38,6 +38,7 @@ export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionR
       },
     });
 
+    // Directly access text property from response (not as a method)
     const text = response.text;
     if (!text) return null;
     return JSON.parse(text) as ExtractionResult;
@@ -46,4 +47,3 @@ export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionR
     return null;
   }
 };
-
