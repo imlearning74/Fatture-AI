@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud } from 'lucide-react';
 import { Invoice, AppView } from './types';
 import { supabase } from './lib/supabase';
@@ -15,6 +15,11 @@ const App: React.FC = () => {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Calcola i fornitori univoci per l'autocompletamento
+  const uniqueVendors = useMemo(() => {
+    return Array.from(new Set(invoices.map(i => i.vendor))).sort();
+  }, [invoices]);
 
   // Caricamento iniziale e Sottoscrizione Real-time
   useEffect(() => {
@@ -198,6 +203,7 @@ const App: React.FC = () => {
         <InvoiceUpload 
           onClose={() => setIsUploadOpen(false)} 
           onSuccess={handleAddInvoice} 
+          existingVendors={uniqueVendors}
         />
       )}
 
