@@ -15,7 +15,6 @@ const App: React.FC = () => {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Caricamento dati da Supabase all'avvio
   useEffect(() => {
     fetchInvoices();
   }, []);
@@ -30,9 +29,9 @@ const App: React.FC = () => {
 
       if (error) throw error;
       if (data) setInvoices(data as Invoice[]);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Errore nel caricamento delle fatture:", e);
-      alert("Errore nel caricamento dei dati dal database.");
+      // Non mostriamo alert qui per non disturbare l'utente all'avvio se il db è vuoto
     } finally {
       setIsLoading(false);
     }
@@ -45,14 +44,16 @@ const App: React.FC = () => {
         .from('invoices')
         .insert([invoice]);
 
-      if (error) throw error;
+      if (error) {
+        console.error("Errore Supabase:", error);
+        throw new Error(error.message);
+      }
       
-      // Aggiorna lo stato locale
       setInvoices(prev => [invoice, ...prev]);
       setIsUploadOpen(false);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Errore nel salvataggio della fattura:", e);
-      alert("Errore durante il salvataggio nel database.");
+      alert(`Errore durante il salvataggio nel database: ${e.message || 'Controlla che la tabella invoices esista in Supabase.'}`);
     }
   };
 
@@ -68,16 +69,15 @@ const App: React.FC = () => {
 
         setInvoices(prev => prev.filter(inv => inv.id !== id));
         if (selectedInvoice?.id === id) setSelectedInvoice(null);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Errore nell'eliminazione della fattura:", e);
-        alert("Errore durante l'eliminazione dal database.");
+        alert(`Errore durante l'eliminazione: ${e.message}`);
       }
     }
   };
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-64 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-6">
           <h1 className="text-xl font-bold flex items-center gap-2">
@@ -128,7 +128,6 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">
@@ -171,7 +170,6 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Upload Modal */}
       {isUploadOpen && (
         <InvoiceUpload 
           onClose={() => setIsUploadOpen(false)} 
@@ -179,7 +177,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* View Modal */}
       {selectedInvoice && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl">
@@ -242,3 +239,4 @@ const DetailItem: React.FC<{ label: string; value: string }> = ({ label, value }
 );
 
 export default App;
+
