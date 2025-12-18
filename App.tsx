@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote } from 'lucide-react';
 import { Invoice, AppView } from './types';
 import { supabase } from './lib/supabase';
 import InvoiceTable from './components/InvoiceTable';
@@ -15,6 +15,12 @@ const App: React.FC = () => {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  
+  // Stato per la modifica della fattura selezionata
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<Invoice>>({});
+  const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
+  const vendorInputRef = useRef<HTMLDivElement>(null);
 
   // Calcola i fornitori univoci per l'autocompletamento
   const uniqueVendors = useMemo(() => {
@@ -25,15 +31,13 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInvoices();
 
-    // Sottoscrizione ai cambiamenti del database per collaborazione multi-utente
     const channel = supabase
       .channel('db-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'invoices' },
         (payload) => {
-          console.log('Cambio rilevato nel DB:', payload);
-          fetchInvoices(); // Ricarica i dati quando qualcuno modifica la tabella
+          fetchInvoices(); 
         }
       )
       .subscribe();
@@ -41,6 +45,17 @@ const App: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, []);
+
+  // Gestione click esterno per suggerimenti fornitori in edit mode
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (vendorInputRef.current && !vendorInputRef.current.contains(event.target as Node)) {
+        setShowVendorSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const fetchInvoices = async () => {
@@ -68,12 +83,32 @@ const App: React.FC = () => {
         .insert([invoice]);
 
       if (error) throw new Error(error.message);
-      
-      // La lista verrà aggiornata automaticamente dal listener real-time
       setIsUploadOpen(false);
     } catch (e: any) {
       console.error("Errore nel salvataggio della fattura:", e);
       alert(`Errore: ${e.message}`);
+    }
+  };
+
+  const handleUpdateInvoice = async () => {
+    if (!selectedInvoice || !editForm) return;
+
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase
+        .from('invoices')
+        .update(editForm)
+        .eq('id', selectedInvoice.id);
+
+      if (error) throw error;
+      
+      setSelectedInvoice({ ...selectedInvoice, ...editForm } as Invoice);
+      setIsEditing(false);
+    } catch (e: any) {
+      console.error("Errore nell'aggiornamento:", e);
+      alert("Errore durante l'aggiornamento dei dati.");
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -86,8 +121,6 @@ const App: React.FC = () => {
           .eq('id', id);
 
         if (error) throw error;
-        
-        // Se l'eliminazione ha successo, il listener aggiornerà la UI
         if (selectedInvoice?.id === id) setSelectedInvoice(null);
       } catch (e: any) {
         console.error("Errore nell'eliminazione della fattura:", e);
@@ -96,8 +129,24 @@ const App: React.FC = () => {
     }
   };
 
+  const startEditing = () => {
+    if (!selectedInvoice) return;
+    setEditForm({
+      vendor: selectedInvoice.vendor,
+      invoiceNumber: selectedInvoice.invoiceNumber,
+      date: selectedInvoice.date,
+      amount: selectedInvoice.amount,
+      currency: selectedInvoice.currency
+    });
+    setIsEditing(true);
+  };
+
+  const filteredVendorSuggestions = uniqueVendors.filter(v => 
+    editForm.vendor && v.toLowerCase().includes(editForm.vendor.toLowerCase())
+  );
+
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900">
       <aside className="w-64 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-6">
           <h1 className="text-xl font-bold flex items-center gap-2">
@@ -183,13 +232,13 @@ const App: React.FC = () => {
                 <Dashboard 
                   invoices={invoices} 
                   onViewAll={() => setView(AppView.INVOICES)}
-                  onInvoiceClick={setSelectedInvoice}
+                  onInvoiceClick={(inv) => { setSelectedInvoice(inv); setIsEditing(false); }}
                 />
               )}
               {view === AppView.INVOICES && (
                 <InvoiceTable 
                   invoices={invoices} 
-                  onView={setSelectedInvoice} 
+                  onView={(inv) => { setSelectedInvoice(inv); setIsEditing(false); }} 
                   onDelete={handleDeleteInvoice} 
                 />
               )}
@@ -212,20 +261,32 @@ const App: React.FC = () => {
           <div className="bg-white rounded-3xl w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
               <div>
-                <h3 className="font-bold text-xl text-slate-900 tracking-tight">{selectedInvoice.vendor}</h3>
+                <h3 className="font-bold text-xl text-slate-900 tracking-tight">{isEditing ? 'Modifica Dati' : selectedInvoice.vendor}</h3>
                 <div className="flex items-center gap-3 mt-1">
                    <span className="text-xs font-medium text-slate-500">Doc n. {selectedInvoice.invoiceNumber}</span>
                    <span className="text-slate-300">•</span>
                    <span className="text-xs font-medium text-slate-500">Data: {selectedInvoice.date}</span>
                 </div>
               </div>
-              <button 
-                onClick={() => setSelectedInvoice(null)}
-                className="p-2 hover:bg-white hover:shadow-sm rounded-full transition-all text-slate-400 hover:text-slate-600"
-              >
-                <X size={24} />
-              </button>
+              <div className="flex items-center gap-2">
+                {!isEditing && (
+                  <button 
+                    onClick={startEditing}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all font-bold text-sm"
+                  >
+                    <Edit2 size={16} />
+                    Modifica
+                  </button>
+                )}
+                <button 
+                  onClick={() => { setSelectedInvoice(null); setIsEditing(false); }}
+                  className="p-2 hover:bg-white hover:shadow-sm rounded-full transition-all text-slate-400 hover:text-slate-600"
+                >
+                  <X size={24} />
+                </button>
+              </div>
             </div>
+            
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
               <div className="flex-1 bg-slate-100 overflow-auto p-6 flex justify-center">
                  <embed
@@ -234,28 +295,118 @@ const App: React.FC = () => {
                     type="application/pdf"
                   />
               </div>
-              <div className="w-full lg:w-80 bg-white border-l border-slate-100 p-8 flex flex-col gap-8">
-                <div>
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Dati Documento</h4>
-                  <div className="space-y-6">
+              
+              <div className="w-full lg:w-96 bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Dati Documento</h4>
+                
+                {isEditing ? (
+                  <div className="space-y-5">
+                    {/* EDIT FORNITORE */}
+                    <div className="space-y-1 relative" ref={vendorInputRef}>
+                      <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><User size={14}/> Fornitore</label>
+                      <div className="relative">
+                        <input 
+                          type="text"
+                          value={editForm.vendor}
+                          onChange={(e) => { setEditForm({...editForm, vendor: e.target.value}); setShowVendorSuggestions(true); }}
+                          onFocus={() => setShowVendorSuggestions(true)}
+                          className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                        />
+                      </div>
+                      {showVendorSuggestions && filteredVendorSuggestions.length > 0 && (
+                        <div className="absolute z-[60] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-40 overflow-y-auto">
+                          {filteredVendorSuggestions.map((v, i) => (
+                            <button
+                              key={i}
+                              onClick={() => { setEditForm({...editForm, vendor: v}); setShowVendorSuggestions(false); }}
+                              className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                            >
+                              {v}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Hash size={14}/> N. Fattura</label>
+                      <input 
+                        type="text"
+                        value={editForm.invoiceNumber}
+                        onChange={(e) => setEditForm({...editForm, invoiceNumber: e.target.value})}
+                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Calendar size={14}/> Data</label>
+                      <input 
+                        type="date"
+                        value={editForm.date}
+                        onChange={(e) => setEditForm({...editForm, date: e.target.value})}
+                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Banknote size={14}/> Importo</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="number"
+                          step="0.01"
+                          value={editForm.amount}
+                          onChange={(e) => setEditForm({...editForm, amount: parseFloat(e.target.value) || 0})}
+                          className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                        />
+                        <select 
+                          value={editForm.currency}
+                          onChange={(e) => setEditForm({...editForm, currency: e.target.value})}
+                          className="w-20 px-1 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                          <option value="EUR">EUR</option>
+                          <option value="USD">USD</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 flex gap-3">
+                      <button 
+                        onClick={() => setIsEditing(false)}
+                        className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all"
+                      >
+                        Annulla
+                      </button>
+                      <button 
+                        onClick={handleUpdateInvoice}
+                        className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Save size={16} /> Salva
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-8">
                     <DetailItem label="Fornitore" value={selectedInvoice.vendor} />
                     <DetailItem label="Numero Documento" value={selectedInvoice.invoiceNumber} />
                     <DetailItem label="Data Emissione" value={selectedInvoice.date} />
                     <DetailItem label="Importo Totale" value={`${selectedInvoice.amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} ${selectedInvoice.currency}`} isAmount />
                   </div>
-                </div>
-                <div className="mt-auto space-y-4">
+                )}
+
+                <div className="mt-auto pt-8 space-y-4">
                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                     <span className="text-[10px] text-slate-400 font-bold block mb-1">FILE ORIGINALE</span>
+                     <span className="text-[10px] text-slate-400 font-bold block mb-1 uppercase">File Originale</span>
                      <span className="text-xs text-slate-600 font-medium truncate block">{selectedInvoice.fileName}</span>
                    </div>
-                   <button 
-                    onClick={() => handleDeleteInvoice(selectedInvoice.id)}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 text-red-600 hover:bg-red-50 rounded-2xl transition-all font-bold text-sm border border-red-100"
-                  >
-                    <Trash2 size={18} />
-                    Elimina Definitivamente
-                  </button>
+                   {!isEditing && (
+                     <button 
+                      onClick={() => handleDeleteInvoice(selectedInvoice.id)}
+                      className="w-full flex items-center justify-center gap-2 py-3.5 text-red-600 hover:bg-red-50 rounded-2xl transition-all font-bold text-sm border border-red-100"
+                    >
+                      <Trash2 size={18} />
+                      Elimina Definitivamente
+                    </button>
+                   )}
                 </div>
               </div>
             </div>
@@ -269,7 +420,7 @@ const App: React.FC = () => {
 const DetailItem: React.FC<{ label: string; value: string; isAmount?: boolean }> = ({ label, value, isAmount }) => (
   <div>
     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">{label}</span>
-    <span className={`${isAmount ? 'text-xl font-black text-blue-600' : 'text-sm font-semibold text-slate-800'} block break-words`}>
+    <span className={`${isAmount ? 'text-2xl font-black text-blue-600' : 'text-sm font-semibold text-slate-800'} block break-words`}>
       {value}
     </span>
   </div>
