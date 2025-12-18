@@ -27,7 +27,8 @@ const Reports: React.FC<ReportsProps> = ({ invoices }) => {
   );
   
   const uniqueYears = useMemo(() => 
-    Array.from(new Set(invoices.map(i => new Date(i.date).getFullYear().toString()))).sort((a, b) => b.localeCompare(a)), 
+    // Fix: Explicitly type sort parameters to avoid 'unknown' type error on localeCompare
+    Array.from(new Set(invoices.map(i => new Date(i.date).getFullYear().toString()))).sort((a: string, b: string) => b.localeCompare(a)), 
     [invoices]
   );
 
