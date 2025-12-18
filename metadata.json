@@ -1,0 +1,8 @@
+
+{
+  "name": "Gestore Fatture Smart Cloud",
+  "description": "Archiviazione intelligente con database cloud e analisi AI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
