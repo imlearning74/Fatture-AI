@@ -2,10 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ExtractionResult } from "./types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
 export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionResult | null> => {
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: [
@@ -47,3 +46,4 @@ export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionR
     return null;
   }
 };
+
