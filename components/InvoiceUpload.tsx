@@ -1,21 +1,26 @@
 
-import React, { useState, useRef } from 'react';
-import { Upload, X, Loader2, CheckCircle2, AlertCircle, FileWarning, ShieldAlert, Save, Edit3, Calendar, User, Hash, Banknote } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, X, Loader2, CheckCircle2, AlertCircle, FileWarning, ShieldAlert, Save, Edit3, Calendar, User, Hash, Banknote, Search } from 'lucide-react';
 import { Invoice, ExtractionResult } from '../types';
 import { extractInvoiceData } from '../geminiService';
 
 interface InvoiceUploadProps {
   onClose: () => void;
   onSuccess: (invoice: Invoice) => void;
+  existingVendors: string[];
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => {
+const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, existingVendors }) => {
   const [status, setStatus] = useState<'idle' | 'reading' | 'processing' | 'review' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [errorType, setErrorType] = useState<'validation' | 'processing' | 'ai'>('validation');
   const [tempFile, setTempFile] = useState<{ name: string; base64: string } | null>(null);
+  
+  // Stato per i suggerimenti fornitori
+  const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
+  const vendorInputRef = useRef<HTMLDivElement>(null);
   
   // Stato per i dati in fase di revisione
   const [reviewData, setReviewData] = useState<ExtractionResult>({
@@ -27,6 +32,17 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => 
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Chiudi suggerimenti quando clicchi fuori
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (vendorInputRef.current && !vendorInputRef.current.contains(event.target as Node)) {
+        setShowVendorSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const readFileAsBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -76,8 +92,6 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => 
         setReviewData(data);
         setStatus('review');
       } else {
-        // Se l'AI fallisce, portiamo comunque l'utente alla schermata di review
-        // ma con i campi vuoti per inserimento manuale
         setReviewData({
           invoiceNumber: '',
           vendor: '',
@@ -98,7 +112,6 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => 
   const handleSave = () => {
     if (!tempFile) return;
     
-    // Validazione minima
     if (!reviewData.vendor || !reviewData.date || reviewData.amount <= 0) {
       alert("Per favore, compila correttamente i campi obbligatori (Fornitore, Data, Importo).");
       return;
@@ -115,6 +128,11 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => 
     setStatus('success');
     setTimeout(() => onSuccess(newInvoice), 600);
   };
+
+  const filteredVendorSuggestions = existingVendors.filter(v => 
+    v.toLowerCase().includes(reviewData.vendor.toLowerCase()) && 
+    v.toLowerCase() !== reviewData.vendor.toLowerCase()
+  );
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -185,18 +203,46 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => 
           {status === 'review' && (
             <div className="p-8 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Fornitore */}
-                <div className="space-y-2">
+                {/* Fornitore con Autocompletamento */}
+                <div className="space-y-2 relative" ref={vendorInputRef}>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
                     <User size={14} className="text-blue-500" /> Fornitore
                   </label>
-                  <input 
-                    type="text"
-                    value={reviewData.vendor}
-                    onChange={(e) => setReviewData({...reviewData, vendor: e.target.value})}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
-                    placeholder="Nome dell'azienda"
-                  />
+                  <div className="relative">
+                    <input 
+                      type="text"
+                      value={reviewData.vendor}
+                      onChange={(e) => {
+                        setReviewData({...reviewData, vendor: e.target.value});
+                        setShowVendorSuggestions(true);
+                      }}
+                      onFocus={() => setShowVendorSuggestions(true)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all pr-10"
+                      placeholder="Cerca o inserisci fornitore"
+                    />
+                    <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                  </div>
+                  
+                  {/* Menu Suggerimenti */}
+                  {showVendorSuggestions && filteredVendorSuggestions.length > 0 && (
+                    <div className="absolute z-[60] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
+                      <div className="p-2 border-b border-slate-50 bg-slate-50/50">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Suggeriti dall'archivio</span>
+                      </div>
+                      {filteredVendorSuggestions.map((v, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            setReviewData({...reviewData, vendor: v});
+                            setShowVendorSuggestions(false);
+                          }}
+                          className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors border-b border-slate-50 last:border-0"
+                        >
+                          {v}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Numero Fattura */}
