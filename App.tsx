@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote } from 'lucide-react';
+import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote, ChevronRight } from 'lucide-react';
 import { Invoice, AppView } from './types';
 import { supabase } from './lib/supabase';
 import InvoiceTable from './components/InvoiceTable';
@@ -129,21 +129,24 @@ const App: React.FC = () => {
     }
   };
 
-  const startEditing = () => {
-    if (!selectedInvoice) return;
+  const startEditing = (invoice: Invoice) => {
     setEditForm({
-      vendor: selectedInvoice.vendor,
-      invoiceNumber: selectedInvoice.invoiceNumber,
-      date: selectedInvoice.date,
-      amount: selectedInvoice.amount,
-      currency: selectedInvoice.currency
+      vendor: invoice.vendor,
+      invoiceNumber: invoice.invoiceNumber,
+      date: invoice.date,
+      amount: invoice.amount,
+      currency: invoice.currency
     });
+    setSelectedInvoice(invoice);
     setIsEditing(true);
   };
 
-  const filteredVendorSuggestions = uniqueVendors.filter(v => 
-    editForm.vendor && v.toLowerCase().includes(editForm.vendor.toLowerCase())
-  );
+  // Logica suggerimenti: mostra tutto se il campo è vuoto, altrimenti filtra
+  const filteredVendorSuggestions = useMemo(() => {
+    const input = editForm.vendor?.toLowerCase() || '';
+    if (!input) return uniqueVendors;
+    return uniqueVendors.filter(v => v.toLowerCase().includes(input));
+  }, [editForm.vendor, uniqueVendors]);
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900">
@@ -239,6 +242,7 @@ const App: React.FC = () => {
                 <InvoiceTable 
                   invoices={invoices} 
                   onView={(inv) => { setSelectedInvoice(inv); setIsEditing(false); }} 
+                  onEdit={startEditing}
                   onDelete={handleDeleteInvoice} 
                 />
               )}
@@ -260,7 +264,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
-              <div>
+              <div className="flex-1">
                 <h3 className="font-bold text-xl text-slate-900 tracking-tight">{isEditing ? 'Modifica Dati' : selectedInvoice.vendor}</h3>
                 <div className="flex items-center gap-3 mt-1">
                    <span className="text-xs font-medium text-slate-500">Doc n. {selectedInvoice.invoiceNumber}</span>
@@ -268,19 +272,19 @@ const App: React.FC = () => {
                    <span className="text-xs font-medium text-slate-500">Data: {selectedInvoice.date}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {!isEditing && (
                   <button 
-                    onClick={startEditing}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all font-bold text-sm"
+                    onClick={() => startEditing(selectedInvoice)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold text-sm shadow-lg shadow-blue-500/20"
                   >
                     <Edit2 size={16} />
-                    Modifica
+                    Modifica Dati
                   </button>
                 )}
                 <button 
                   onClick={() => { setSelectedInvoice(null); setIsEditing(false); }}
-                  className="p-2 hover:bg-white hover:shadow-sm rounded-full transition-all text-slate-400 hover:text-slate-600"
+                  className="p-2 hover:bg-slate-200 rounded-full transition-all text-slate-400 hover:text-slate-600"
                 >
                   <X size={24} />
                 </button>
@@ -310,16 +314,16 @@ const App: React.FC = () => {
                           value={editForm.vendor}
                           onChange={(e) => { setEditForm({...editForm, vendor: e.target.value}); setShowVendorSuggestions(true); }}
                           onFocus={() => setShowVendorSuggestions(true)}
-                          className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
                         />
                       </div>
                       {showVendorSuggestions && filteredVendorSuggestions.length > 0 && (
-                        <div className="absolute z-[60] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-40 overflow-y-auto">
+                        <div className="absolute z-[100] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.15)] max-h-48 overflow-y-auto">
                           {filteredVendorSuggestions.map((v, i) => (
                             <button
                               key={i}
                               onClick={() => { setEditForm({...editForm, vendor: v}); setShowVendorSuggestions(false); }}
-                              className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                              className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors border-b border-slate-50 last:border-0"
                             >
                               {v}
                             </button>
@@ -334,7 +338,7 @@ const App: React.FC = () => {
                         type="text"
                         value={editForm.invoiceNumber}
                         onChange={(e) => setEditForm({...editForm, invoiceNumber: e.target.value})}
-                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
                       />
                     </div>
 
@@ -344,7 +348,7 @@ const App: React.FC = () => {
                         type="date"
                         value={editForm.date}
                         onChange={(e) => setEditForm({...editForm, date: e.target.value})}
-                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
                       />
                     </div>
 
@@ -356,12 +360,12 @@ const App: React.FC = () => {
                           step="0.01"
                           value={editForm.amount}
                           onChange={(e) => setEditForm({...editForm, amount: parseFloat(e.target.value) || 0})}
-                          className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
+                          className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
                         />
                         <select 
                           value={editForm.currency}
                           onChange={(e) => setEditForm({...editForm, currency: e.target.value})}
-                          className="w-20 px-1 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                          className="w-20 px-1 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                         >
                           <option value="EUR">EUR</option>
                           <option value="USD">USD</option>
@@ -369,18 +373,18 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="pt-4 flex gap-3">
+                    <div className="pt-6 flex gap-3">
                       <button 
                         onClick={() => setIsEditing(false)}
-                        className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all"
+                        className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all"
                       >
                         Annulla
                       </button>
                       <button 
                         onClick={handleUpdateInvoice}
-                        className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                        className="flex-1 py-3.5 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
                       >
-                        <Save size={16} /> Salva
+                        <Save size={16} /> Salva Dati
                       </button>
                     </div>
                   </div>
@@ -427,3 +431,4 @@ const DetailItem: React.FC<{ label: string; value: string; isAmount?: boolean }>
 );
 
 export default App;
+
