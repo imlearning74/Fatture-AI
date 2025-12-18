@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, X, Loader2, CheckCircle2, AlertCircle, FileWarning, ShieldAlert, Save, Edit3, Calendar, User, Hash, Banknote, Search } from 'lucide-react';
 import { Invoice, ExtractionResult } from '../types';
 import { extractInvoiceData } from '../geminiService';
@@ -129,10 +129,11 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, exist
     setTimeout(() => onSuccess(newInvoice), 600);
   };
 
-  // Correzione filtro: rimosso l'esclusione del nome esatto per garantire che l'utente veda il match
-  const filteredVendorSuggestions = existingVendors.filter(v => 
-    reviewData.vendor && v.toLowerCase().includes(reviewData.vendor.toLowerCase())
-  );
+  const filteredVendorSuggestions = useMemo(() => {
+    const input = reviewData.vendor?.toLowerCase() || '';
+    if (!input) return existingVendors;
+    return existingVendors.filter(v => v.toLowerCase().includes(input));
+  }, [reviewData.vendor, existingVendors]);
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -225,7 +226,7 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, exist
                   
                   {/* Menu Suggerimenti */}
                   {showVendorSuggestions && filteredVendorSuggestions.length > 0 && (
-                    <div className="absolute z-[60] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
+                    <div className="absolute z-[100] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.15)] max-h-48 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
                       <div className="p-2 border-b border-slate-50 bg-slate-50/50">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Suggeriti dall'archivio</span>
                       </div>
@@ -364,3 +365,4 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, exist
 };
 
 export default InvoiceUpload;
+
