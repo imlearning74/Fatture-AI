@@ -1,368 +1,220 @@
-
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Upload, X, Loader2, CheckCircle2, AlertCircle, FileWarning, ShieldAlert, Save, Edit3, Calendar, User, Hash, Banknote, Search } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+// Corrected import: added FileText and Trash2 which were missing from the top imports
+import { Upload, X, Loader2, CheckCircle2, FileWarning, ShieldAlert, Save, Search, FolderOpen, Files, PlayCircle, FileText, Trash2 } from 'lucide-react';
 import { Invoice, ExtractionResult } from '../types';
 import { extractInvoiceData } from '../geminiService';
 
 interface InvoiceUploadProps {
   onClose: () => void;
-  onSuccess: (invoice: Invoice) => void;
+  onSuccess: (invoices: Invoice[]) => void;
   existingVendors: string[];
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+interface FileProgress {
+  id: string;
+  name: string;
+  file: File;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  error?: string;
+  result?: ExtractionResult;
+}
 
-const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess, existingVendors }) => {
-  const [status, setStatus] = useState<'idle' | 'reading' | 'processing' | 'review' | 'success' | 'error'>('idle');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [errorType, setErrorType] = useState<'validation' | 'processing' | 'ai'>('validation');
-  const [tempFile, setTempFile] = useState<{ name: string; base64: string } | null>(null);
-  
-  // Stato per i suggerimenti fornitori
-  const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
-  const vendorInputRef = useRef<HTMLDivElement>(null);
-  
-  // Stato per i dati in fase di revisione
-  const [reviewData, setReviewData] = useState<ExtractionResult>({
-    invoiceNumber: '',
-    vendor: '',
-    date: '',
-    amount: 0,
-    currency: 'EUR'
-  });
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onClose, onSuccess }) => {
+  const [queue, setQueue] = useState<FileProgress[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  // Chiudi suggerimenti quando clicchi fuori
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (vendorInputRef.current && !vendorInputRef.current.contains(event.target as Node)) {
-        setShowVendorSuggestions(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return;
+    const newFiles: FileProgress[] = Array.from(files)
+      .filter(f => f.type === 'application/pdf')
+      .map(f => ({
+        id: Math.random().toString(36).substr(2, 9),
+        name: f.name,
+        file: f,
+        status: 'pending'
+      }));
+    setQueue(prev => [...prev, ...newFiles]);
+  };
 
   const readFileAsBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        if (!result) {
-          reject(new Error("Il file sembra vuoto o non leggibile."));
-          return;
-        }
-        resolve(result.split(',')[1]);
-      };
-      reader.onerror = () => reject(new Error("Errore durante la lettura del file."));
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = () => reject(new Error("Errore lettura file"));
       reader.readAsDataURL(file);
     });
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processQueue = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
 
-    setErrorMessage('');
-    
-    if (file.type !== 'application/pdf') {
-      setStatus('error');
-      setErrorType('validation');
-      setErrorMessage(`Formato "${file.type || 'sconosciuto'}" non supportato. Carica esclusivamente file PDF.`);
-      return;
-    }
+    const updatedInvoices: Invoice[] = [];
+    const updatedQueue = [...queue];
 
-    if (file.size > MAX_FILE_SIZE) {
-      setStatus('error');
-      setErrorType('validation');
-      setErrorMessage(`Il file è troppo grande (${(file.size / (1024 * 1024)).toFixed(1)}MB). Il limite massimo è 10MB.`);
-      return;
-    }
+    for (let i = 0; i < updatedQueue.length; i++) {
+      if (updatedQueue[i].status !== 'pending') continue;
 
-    try {
-      setStatus('reading');
-      const base64 = await readFileAsBase64(file);
-      setTempFile({ name: file.name, base64 });
-      
-      setStatus('processing');
-      const data = await extractInvoiceData(base64);
+      try {
+        updatedQueue[i].status = 'processing';
+        setQueue([...updatedQueue]);
 
-      if (data) {
-        setReviewData(data);
-        setStatus('review');
-      } else {
-        setReviewData({
-          invoiceNumber: '',
-          vendor: '',
-          date: new Date().toISOString().split('T')[0],
-          amount: 0,
-          currency: 'EUR'
-        });
-        setStatus('review');
+        const base64 = await readFileAsBase64(updatedQueue[i].file);
+        const data = await extractInvoiceData(base64);
+
+        if (data) {
+          updatedQueue[i].status = 'completed';
+          updatedQueue[i].result = data;
+          
+          updatedInvoices.push({
+            id: crypto.randomUUID(),
+            ...data,
+            pdfData: base64,
+            fileName: updatedQueue[i].name,
+            createdAt: Date.now(),
+            status: 'draft' // Caricamento massivo -> Sempre bozza inizialmente
+          });
+        } else {
+          updatedQueue[i].status = 'error';
+          updatedQueue[i].error = "AI non è riuscita a estrarre i dati";
+        }
+      } catch (err: any) {
+        updatedQueue[i].status = 'error';
+        updatedQueue[i].error = err.message;
       }
-    } catch (err: any) {
-      console.error(err);
-      setStatus('error');
-      setErrorType('processing');
-      setErrorMessage(err.message || "Si è verificato un problema tecnico durante l'elaborazione.");
-    }
-  };
-
-  const handleSave = () => {
-    if (!tempFile) return;
-    
-    if (!reviewData.vendor || !reviewData.date || reviewData.amount <= 0) {
-      alert("Per favore, compila correttamente i campi obbligatori (Fornitore, Data, Importo).");
-      return;
+      setQueue([...updatedQueue]);
+      // Breve pausa tra le chiamate API per rispettare eventuali rate limits
+      await new Promise(r => setTimeout(r, 500));
     }
 
-    const newInvoice: Invoice = {
-      id: crypto.randomUUID(),
-      ...reviewData,
-      pdfData: tempFile.base64,
-      fileName: tempFile.name,
-      createdAt: Date.now()
-    };
-    
-    setStatus('success');
-    setTimeout(() => onSuccess(newInvoice), 600);
+    if (updatedInvoices.length > 0) {
+      onSuccess(updatedInvoices);
+    }
+    setIsProcessing(false);
   };
 
-  const filteredVendorSuggestions = useMemo(() => {
-    const input = reviewData.vendor?.toLowerCase() || '';
-    if (!input) return existingVendors;
-    return existingVendors.filter(v => v.toLowerCase().includes(input));
-  }, [reviewData.vendor, existingVendors]);
+  const completedCount = queue.filter(f => f.status === 'completed').length;
+  const errorCount = queue.filter(f => f.status === 'error').length;
+  const pendingCount = queue.filter(f => f.status === 'pending' || f.status === 'processing').length;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-      <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300 flex flex-col ${status === 'review' ? 'w-full max-w-2xl' : 'w-full max-w-md'}`}>
-        
-        {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
+      <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+        <div className="p-8 border-b border-slate-100 flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-bold text-slate-900 tracking-tight">
-              {status === 'review' ? 'Revisione Dati Fattura' : 'Nuova Fattura'}
-            </h3>
-            <p className="text-xs text-slate-500 font-medium">
-              {status === 'review' ? 'Verifica e correggi i dati estratti dall\'AI' : 'Analisi istantanea con Gemini AI'}
-            </p>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importazione Intelligente</h3>
+            <p className="text-sm text-slate-500 font-medium">L'AI analizzerà i documenti e li salverà come <span className="text-amber-600 font-bold">Bozza</span></p>
           </div>
-          <button 
-            onClick={onClose} 
-            className="p-2 hover:bg-white hover:shadow-sm rounded-full transition-all text-slate-400 hover:text-slate-600"
-          >
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"><X size={24} /></button>
         </div>
 
-        <div className="overflow-y-auto max-h-[80vh]">
-          {status === 'idle' && (
-            <div className="p-8">
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-200 rounded-2xl p-12 flex flex-col items-center justify-center gap-5 hover:border-blue-500 hover:bg-blue-50/30 cursor-pointer transition-all group relative"
-              >
-                <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-sm">
-                  <Upload size={36} />
-                </div>
-                <div className="text-center">
-                  <p className="font-bold text-slate-800 text-lg">Seleziona Documento</p>
-                  <p className="text-sm text-slate-500 mt-1">Trascina qui il tuo PDF o clicca per sfogliare</p>
-                </div>
-                <div className="mt-2 px-3 py-1 bg-slate-100 rounded-full text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  Max 10MB • PDF Only
-                </div>
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="application/pdf"
-                  onChange={handleFileChange}
-                />
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+          {/* Area Selezione */}
+          <div className="w-full lg:w-1/3 p-8 bg-slate-50/50 border-r border-slate-100 flex flex-col gap-6">
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex-1 border-2 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center gap-4 hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer group text-center px-4"
+            >
+              <Files className="text-slate-300 group-hover:text-blue-500 transition-colors" size={48} />
+              <div>
+                <p className="font-bold text-slate-800">Seleziona File</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Multiplo attivo</p>
               </div>
             </div>
-          )}
-
-          {(status === 'reading' || status === 'processing') && (
-            <div className="p-12 flex flex-col items-center justify-center gap-8">
-              <div className="relative">
-                <Loader2 className="w-20 h-20 text-blue-600 animate-spin" strokeWidth={1.5} />
-              </div>
-              <div className="text-center">
-                <h4 className="font-black text-xl text-slate-900 tracking-tight">
-                  {status === 'reading' ? 'Lettura in corso...' : 'Analisi AI in corso...'}
-                </h4>
-                <p className="text-sm text-slate-500 mt-2">
-                  Stiamo estraendo i dati dal tuo documento.
-                </p>
-              </div>
+            
+            <div 
+              onClick={() => folderInputRef.current?.click()}
+              className="h-32 border-2 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center gap-3 hover:border-indigo-500 hover:bg-indigo-50 transition-all cursor-pointer group text-center"
+            >
+              <FolderOpen className="text-slate-300 group-hover:text-indigo-500 transition-colors" size={32} />
+              <p className="font-bold text-slate-800 text-sm">Carica Intera Cartella</p>
             </div>
-          )}
 
-          {status === 'review' && (
-            <div className="p-8 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Fornitore con Autocompletamento */}
-                <div className="space-y-2 relative" ref={vendorInputRef}>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                    <User size={14} className="text-blue-500" /> Fornitore
-                  </label>
-                  <div className="relative">
-                    <input 
-                      type="text"
-                      value={reviewData.vendor}
-                      onChange={(e) => {
-                        setReviewData({...reviewData, vendor: e.target.value});
-                        setShowVendorSuggestions(true);
-                      }}
-                      onFocus={() => setShowVendorSuggestions(true)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all pr-10"
-                      placeholder="Cerca o inserisci fornitore"
-                    />
-                    <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" />
-                  </div>
-                  
-                  {/* Menu Suggerimenti */}
-                  {showVendorSuggestions && filteredVendorSuggestions.length > 0 && (
-                    <div className="absolute z-[100] w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.15)] max-h-48 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
-                      <div className="p-2 border-b border-slate-50 bg-slate-50/50">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Suggeriti dall'archivio</span>
-                      </div>
-                      {filteredVendorSuggestions.map((v, i) => (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            setReviewData({...reviewData, vendor: v});
-                            setShowVendorSuggestions(false);
-                          }}
-                          className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors border-b border-slate-50 last:border-0"
-                        >
-                          {v}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+            <input type="file" ref={fileInputRef} className="hidden" multiple accept="application/pdf" onChange={(e) => handleFiles(e.target.files)} />
+            <input type="file" ref={folderInputRef} className="hidden" {...({ webkitdirectory: "", directory: "" } as any)} multiple onChange={(e) => handleFiles(e.target.files)} />
 
-                {/* Numero Fattura */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                    <Hash size={14} className="text-blue-500" /> Numero Fattura
-                  </label>
-                  <input 
-                    type="text"
-                    value={reviewData.invoiceNumber}
-                    onChange={(e) => setReviewData({...reviewData, invoiceNumber: e.target.value})}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
-                    placeholder="Es. FATT-2024-001"
-                  />
-                </div>
-
-                {/* Data */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                    <Calendar size={14} className="text-blue-500" /> Data Documento
-                  </label>
-                  <input 
-                    type="date"
-                    value={reviewData.date}
-                    onChange={(e) => setReviewData({...reviewData, date: e.target.value})}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
-                  />
-                </div>
-
-                {/* Importo e Valuta */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                    <Banknote size={14} className="text-blue-500" /> Importo Totale
-                  </label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="number"
-                      step="0.01"
-                      value={reviewData.amount}
-                      onChange={(e) => setReviewData({...reviewData, amount: parseFloat(e.target.value) || 0})}
-                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
-                    />
-                    <select 
-                      value={reviewData.currency}
-                      onChange={(e) => setReviewData({...reviewData, currency: e.target.value})}
-                      className="w-24 px-2 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
-                    >
-                      <option value="EUR">EUR (€)</option>
-                      <option value="USD">USD ($)</option>
-                      <option value="GBP">GBP (£)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-slate-100 flex gap-4">
-                <button 
-                  onClick={() => setStatus('idle')}
-                  className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl transition-all font-bold text-sm hover:bg-slate-200 active:scale-95"
-                >
-                  Cambia File
-                </button>
-                <button 
-                  onClick={handleSave}
-                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-blue-500/20 hover:bg-blue-700 active:scale-95 flex items-center justify-center gap-2"
-                >
-                  <Save size={18} />
-                  Conferma e Salva
-                </button>
-              </div>
-            </div>
-          )}
-
-          {status === 'success' && (
-            <div className="p-12 flex flex-col items-center justify-center gap-5 text-emerald-600 animate-in zoom-in">
-              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center shadow-inner">
-                <CheckCircle2 size={48} />
-              </div>
-              <div className="text-center">
-                <h4 className="font-black text-xl text-slate-900 tracking-tight">Archiviato!</h4>
-                <p className="text-sm text-slate-500 mt-2 font-medium">Fattura salvata correttamente nel database cloud.</p>
-              </div>
-            </div>
-          )}
-
-          {status === 'error' && (
-            <div className="p-12 flex flex-col items-center justify-center">
-              <div className={`w-20 h-20 ${errorType === 'validation' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600'} rounded-full flex items-center justify-center mb-6`}>
-                {errorType === 'validation' ? <FileWarning size={40} /> : <ShieldAlert size={40} />}
-              </div>
-              <div className="text-center">
-                <h4 className="font-black text-lg text-slate-900 tracking-tight">Errore Caricamento</h4>
-                <p className="mt-2 text-sm text-slate-600 leading-relaxed">{errorMessage}</p>
-              </div>
+            {queue.length > 0 && !isProcessing && pendingCount > 0 && (
               <button 
-                onClick={() => setStatus('idle')}
-                className="mt-8 w-full py-4 bg-slate-900 text-white rounded-2xl font-bold text-sm shadow-lg hover:shadow-xl active:scale-95 transition-all"
+                onClick={processQueue}
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-3 active:scale-95"
               >
-                Riprova
+                <PlayCircle size={20} /> Avvia Analisi AI ({pendingCount})
               </button>
-            </div>
-          )}
-        </div>
-        
-        {status === 'idle' && (
-          <div className="px-8 pb-8">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-3">
-              <Edit3 size={18} className="text-blue-500 shrink-0 mt-0.5" />
-              <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                <span className="font-bold text-slate-700 block mb-0.5">Controllo Manuale</span>
-                Dopo l'analisi automatica potrai revisionare e modificare ogni campo estratto per garantirti la massima precisione nell'archivio.
-              </p>
-            </div>
+            )}
           </div>
-        )}
+
+          {/* Coda di Elaborazione */}
+          <div className="flex-1 flex flex-col p-8 overflow-hidden">
+            <div className="flex items-center justify-between mb-6">
+               <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Coda di Elaborazione ({queue.length})</h4>
+               <div className="flex gap-4">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-1.5"><CheckCircle2 size={12}/> {completedCount} completi</span>
+                  {errorCount > 0 && <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest flex items-center gap-1.5"><FileWarning size={12}/> {errorCount} errori</span>}
+               </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+              {queue.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4 opacity-50">
+                  <Upload size={48} strokeWidth={1.5} />
+                  <p className="text-sm font-medium">Nessun file selezionato</p>
+                </div>
+              ) : (
+                queue.map((item) => (
+                  <div key={item.id} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm group hover:border-slate-200 transition-all">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        item.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : 
+                        item.status === 'error' ? 'bg-red-100 text-red-600' : 
+                        item.status === 'processing' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        {item.status === 'processing' ? <Loader2 size={18} className="animate-spin" /> : 
+                         item.status === 'completed' ? <CheckCircle2 size={18} /> : 
+                         item.status === 'error' ? <FileWarning size={18} /> : <FileText size={18} />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate pr-4">{item.name}</p>
+                        <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest mt-0.5">
+                          {item.status === 'pending' && 'In attesa'}
+                          {item.status === 'processing' && 'Analisi in corso...'}
+                          {item.status === 'completed' && `${item.result?.vendor || 'Fornitore sconosciuto'}`}
+                          {item.status === 'error' && <span className="text-red-500">{item.error}</span>}
+                        </p>
+                      </div>
+                    </div>
+                    {item.status === 'pending' && !isProcessing && (
+                      <button onClick={() => setQueue(prev => prev.filter(f => f.id !== item.id))} className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {isProcessing && (
+              <div className="mt-8 p-6 bg-blue-600 rounded-3xl text-white flex items-center justify-between shadow-xl animate-in slide-in-from-bottom-6">
+                <div className="flex items-center gap-4">
+                  <Loader2 className="animate-spin" />
+                  <div>
+                    <p className="font-black text-sm tracking-tight">Elaborazione Massiva AI</p>
+                    <p className="text-[10px] font-bold text-blue-100 uppercase tracking-widest mt-0.5">Resta in questa schermata fino al completamento</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-black tabular-nums">{Math.round((completedCount + errorCount) / queue.length * 100)}%</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
 export default InvoiceUpload;
-
