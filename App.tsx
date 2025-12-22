@@ -19,7 +19,8 @@ const {
   Search: SearchIcon,
   Calendar: CalIcon,
   Banknote: BankIcon,
-  Hash: HashIcon
+  Hash: HashIcon,
+  ChevronRight: ChevronRightIcon
 } = LucideIcons;
 
 import { Invoice, AppView } from './types';
@@ -41,6 +42,14 @@ const App: React.FC = () => {
   
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
+
+  // Calcoliamo quante bozze rimangono oltre a quella eventualmente selezionata
+  const draftInvoices = useMemo(() => invoices.filter(inv => inv.status === 'draft'), [invoices]);
+  const nextDraft = useMemo(() => {
+    if (!selectedInvoice) return null;
+    // Troviamo la prima bozza che non sia quella attuale
+    return draftInvoices.find(inv => inv.id !== selectedInvoice.id) || null;
+  }, [draftInvoices, selectedInvoice]);
 
   useEffect(() => {
     const initSession = async () => {
@@ -67,7 +76,7 @@ const App: React.FC = () => {
     if (session) {
       fetchInvoices();
       const channel = supabase
-        .channel('db-changes')
+        .channel('db-changes-main')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => fetchInvoices())
         .subscribe();
       return () => { supabase.removeChannel(channel); };
@@ -120,6 +129,16 @@ const App: React.FC = () => {
     setIsEditing(true);
   };
 
+  const goToNextDraft = () => {
+    if (nextDraft) {
+      setSelectedInvoice(nextDraft);
+      setIsEditing(false);
+      setEditForm({});
+    } else {
+      setSelectedInvoice(null);
+    }
+  };
+
   const handleUpdateInvoice = async () => {
     if (!selectedInvoice || !editForm || !session) return;
     setIsSyncing(true);
@@ -127,6 +146,8 @@ const App: React.FC = () => {
       const updatedData = { ...editForm, status: 'verified' as const };
       const { error } = await supabase.from('invoices').update(updatedData).eq('id', selectedInvoice.id);
       if (error) throw error;
+      
+      // Invece di chiudere subito, aggiorniamo lo stato locale per permettere la navigazione
       setSelectedInvoice({ ...selectedInvoice, ...updatedData, status: 'verified' });
       setIsEditing(false);
       fetchInvoices();
@@ -156,7 +177,12 @@ const App: React.FC = () => {
       try {
         const { error } = await supabase.from('invoices').delete().eq('id', id);
         if (error) throw error;
-        if (selectedInvoice?.id === id) setSelectedInvoice(null);
+        
+        if (nextDraft) {
+          goToNextDraft();
+        } else {
+          setSelectedInvoice(null);
+        }
         fetchInvoices();
       } catch (e: any) {
         alert("Errore eliminazione.");
@@ -324,17 +350,32 @@ const App: React.FC = () => {
                 {/* Footer Sidebar */}
                 <div className="pt-8 border-t border-slate-100 mt-8 space-y-3">
                   {isEditing ? (
-                    <div className="flex gap-3">
-                      <button onClick={() => setIsEditing(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Annulla</button>
-                      <button onClick={handleUpdateInvoice} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+                    <div className="flex flex-col gap-3">
+                      <button onClick={handleUpdateInvoice} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
                         <SaveIcon size={16} /> Salva e Verifica
                       </button>
+                      <button onClick={() => setIsEditing(false)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Annulla</button>
                     </div>
                   ) : (
                     <>
-                      <button onClick={() => startEditing(selectedInvoice)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
-                        <EditIcon size={16} /> Modifica Dati
-                      </button>
+                      {selectedInvoice.status === 'verified' && nextDraft && (
+                        <button onClick={goToNextDraft} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 animate-bounce-slow">
+                          Prossima Bozza <ChevronRightIcon size={16} />
+                        </button>
+                      )}
+                      
+                      {selectedInvoice.status === 'draft' && (
+                        <button onClick={() => startEditing(selectedInvoice)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
+                          <EditIcon size={16} /> Modifica Dati
+                        </button>
+                      )}
+
+                      {nextDraft && (
+                         <button onClick={goToNextDraft} className="w-full py-3 bg-blue-50 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-100 transition-all flex items-center justify-center gap-2">
+                           Salta alla prossima bozza <ChevronRightIcon size={14} />
+                         </button>
+                      )}
+
                       <button onClick={() => handleDeleteInvoice(selectedInvoice.id)} className="w-full py-4 bg-white text-red-500 border border-red-100 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-50 transition-all flex items-center justify-center gap-2">
                         <TrashIcon size={16} /> Elimina Documento
                       </button>
