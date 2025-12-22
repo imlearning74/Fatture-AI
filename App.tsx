@@ -1,14 +1,16 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote, CheckCircle2, AlertCircle, LogOut, Users } from 'lucide-react';
 import { Invoice, AppView } from './types';
 import { supabase } from './lib/supabase';
 import InvoiceTable from './components/InvoiceTable';
 import InvoiceUpload from './components/InvoiceUpload';
 import Reports from './components/Reports';
 import Dashboard from './components/Dashboard';
+import { Auth } from './components/Auth';
 
 const App: React.FC = () => {
+  const [session, setSession] = useState<any>(null);
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -21,18 +23,36 @@ const App: React.FC = () => {
   const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
   const vendorInputRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   const uniqueVendors = useMemo(() => {
     return Array.from(new Set(invoices.map(i => i.vendor))).sort();
   }, [invoices]);
 
   useEffect(() => {
-    fetchInvoices();
-    const channel = supabase
-      .channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => fetchInvoices())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    if (session) {
+      fetchInvoices();
+      // Ascoltiamo TUTTE le modifiche al database (senza filtri utente)
+      const channel = supabase
+        .channel('db-changes-shared')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => fetchInvoices())
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
+    } else {
+      setInvoices([]);
+      setIsLoading(false);
+    }
+  }, [session]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -45,8 +65,10 @@ const App: React.FC = () => {
   }, []);
 
   const fetchInvoices = async () => {
+    if (!session) return;
     setIsSyncing(true);
     try {
+      // Query globale senza filtri user_id
       const { data, error } = await supabase
         .from('invoices')
         .select('*')
@@ -62,8 +84,15 @@ const App: React.FC = () => {
   };
 
   const handleAddInvoices = async (newInvoices: Invoice[]) => {
+    if (!session) return;
     try {
-      const { error } = await supabase.from('invoices').insert(newInvoices);
+      // Registriamo comunque chi ha fatto l'upload per tracciabilità
+      const invoicesWithUser = newInvoices.map(inv => ({
+        ...inv,
+        user_id: session.user.id
+      }));
+      
+      const { error } = await supabase.from('invoices').insert(invoicesWithUser);
       if (error) throw new Error(error.message);
       setIsUploadOpen(false);
     } catch (e: any) {
@@ -72,10 +101,9 @@ const App: React.FC = () => {
   };
 
   const handleUpdateInvoice = async () => {
-    if (!selectedInvoice || !editForm) return;
+    if (!selectedInvoice || !editForm || !session) return;
     setIsSyncing(true);
     try {
-      // Quando salviamo manualmente, forziamo lo stato a 'verified'
       const updatedData = { ...editForm, status: 'verified' as const };
       const { error } = await supabase.from('invoices').update(updatedData).eq('id', selectedInvoice.id);
       if (error) throw error;
@@ -89,7 +117,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteInvoice = async (id: string) => {
-    if (window.confirm("Eliminare definitivamente questa fattura?")) {
+    if (window.confirm("Eliminare definitivamente questa fattura dall'archivio condiviso?")) {
       try {
         const { error } = await supabase.from('invoices').delete().eq('id', id);
         if (error) throw error;
@@ -112,6 +140,14 @@ const App: React.FC = () => {
     setIsEditing(true);
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
+  if (!session) {
+    return <Auth />;
+  }
+
   const filteredVendorSuggestions = useMemo(() => {
     const input = editForm.vendor?.toLowerCase() || '';
     if (!input) return uniqueVendors;
@@ -128,7 +164,7 @@ const App: React.FC = () => {
           </h1>
           <div className="flex items-center gap-2 mt-1">
             <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cloud Sync Attivo</p>
+            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Archivio Condiviso</p>
           </div>
         </div>
 
@@ -144,31 +180,51 @@ const App: React.FC = () => {
           </button>
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-4 space-y-3">
           <button onClick={() => setIsUploadOpen(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition shadow-lg active:scale-95">
             <Plus size={20} /> Caricamento Massivo
           </button>
+          
+          <div className="pt-4 border-t border-slate-800">
+             <div className="flex items-center gap-2 mb-3 px-4">
+                <Users size={12} className="text-slate-500"/>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Utenti Autenticati</span>
+             </div>
+            <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-2xl overflow-hidden border border-white/5">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 uppercase font-black text-xs">
+                {session.user.email?.[0]}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest truncate">{session.user.email}</p>
+                <button onClick={handleLogout} className="text-[9px] font-bold text-red-400 hover:text-red-300 transition-colors uppercase mt-0.5 flex items-center gap-1">
+                  <LogOut size={10}/> Logout
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-          <h2 className="text-lg font-bold text-slate-800">
-            {view === AppView.DASHBOARD && 'Dashboard Principale'}
-            {view === AppView.INVOICES && 'Gestione Documenti'}
-            {view === AppView.REPORTS && 'Reportistica Intelligente'}
-          </h2>
-          <div className="flex items-center gap-3 px-3 py-1 bg-slate-50 border border-slate-100 rounded-full">
-            <Cloud size={14} className="text-slate-400" />
-            <span className="text-xs font-bold text-slate-500">{invoices.length} Elementi</span>
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-bold text-slate-800">
+              {view === AppView.DASHBOARD && 'Dashboard Condivisa'}
+              {view === AppView.INVOICES && 'Archivio Documenti'}
+              {view === AppView.REPORTS && 'Reportistica Globale'}
+            </h2>
+          </div>
+          <div className="flex items-center gap-3 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full">
+            <Cloud size={14} className="text-blue-400" />
+            <span className="text-xs font-bold text-blue-600">{invoices.length} Documenti Totali</span>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">
-          {isLoading && invoices.length === 0 ? (
+          {isLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <Loader2 className="animate-spin text-blue-500 w-12 h-12" />
-              <p className="text-slate-400 font-medium">Connessione al database...</p>
+              <p className="text-slate-400 font-medium">Sincronizzazione archivio...</p>
             </div>
           ) : (
             <>
@@ -188,20 +244,20 @@ const App: React.FC = () => {
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
               <div className="flex items-center gap-4">
                 <div>
-                  <h3 className="font-bold text-xl text-slate-900 tracking-tight">{isEditing ? 'Revisione Manuale' : selectedInvoice.vendor}</h3>
+                  <h3 className="font-bold text-xl text-slate-900 tracking-tight">{isEditing ? 'Revisione Dati' : selectedInvoice.vendor}</h3>
                   <div className="flex items-center gap-3 mt-1">
                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider flex items-center gap-1 ${selectedInvoice.status === 'verified' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                         {selectedInvoice.status === 'verified' ? <CheckCircle2 size={10}/> : <AlertCircle size={10}/>}
                         {selectedInvoice.status === 'verified' ? 'Verificato' : 'Bozza'}
                      </span>
-                     <span className="text-xs font-medium text-slate-500">N. {selectedInvoice.invoiceNumber}</span>
+                     <span className="text-xs font-medium text-slate-500">Documento n. {selectedInvoice.invoiceNumber}</span>
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 {!isEditing && (
                   <button onClick={() => startEditing(selectedInvoice)} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all font-bold text-sm shadow-lg shadow-indigo-500/20">
-                    <Edit2 size={16} /> Revisiona e Conferma
+                    <Edit2 size={16} /> Modifica e Conferma
                   </button>
                 )}
                 <button onClick={() => { setSelectedInvoice(null); setIsEditing(false); }} className="p-2 hover:bg-slate-200 rounded-full transition-all text-slate-400">
@@ -215,7 +271,7 @@ const App: React.FC = () => {
                  <embed src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} className="w-full h-full min-h-[500px] border-0 rounded-xl shadow-xl" type="application/pdf" />
               </div>
               <div className="w-full lg:w-96 bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Informazioni Estratte</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Informazioni Documento</h4>
                 {isEditing ? (
                   <div className="space-y-5">
                     <div className="space-y-1 relative" ref={vendorInputRef}>
@@ -249,7 +305,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="pt-6 flex gap-3">
                       <button onClick={() => setIsEditing(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200">Annulla</button>
-                      <button onClick={handleUpdateInvoice} className="flex-1 py-3.5 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"><Save size={16} /> Conferma Dati</button>
+                      <button onClick={handleUpdateInvoice} className="flex-1 py-3.5 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"><Save size={16} /> Salva Modifiche</button>
                     </div>
                   </div>
                 ) : (
@@ -261,13 +317,13 @@ const App: React.FC = () => {
                   </div>
                 )}
                 <div className="mt-auto pt-8 space-y-4">
-                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                     <span className="text-[10px] text-slate-400 font-bold block mb-1 uppercase tracking-wider text-center">Integrità File Garantita</span>
-                     <span className="text-[10px] text-slate-400 truncate block text-center font-medium opacity-60 italic">MD5 Sync: {selectedInvoice.id.split('-')[0]}</span>
+                   <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 text-center">
+                     <span className="text-[10px] text-blue-600 font-bold block mb-1 uppercase tracking-wider">Accesso Condiviso Attivo</span>
+                     <span className="text-[9px] text-slate-400 font-medium">Qualsiasi utente loggato può modificare questo file.</span>
                    </div>
                    {!isEditing && (
                      <button onClick={() => handleDeleteInvoice(selectedInvoice.id)} className="w-full flex items-center justify-center gap-2 py-3.5 text-red-600 hover:bg-red-50 rounded-2xl transition-all font-bold text-sm border border-red-100">
-                      <Trash2 size={18} /> Elimina Documento
+                      <Trash2 size={18} /> Rimuovi Documento
                     </button>
                    )}
                 </div>
