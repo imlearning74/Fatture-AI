@@ -9,6 +9,7 @@ export interface Invoice {
   pdfData: string; // Base64
   fileName: string;
   createdAt: number;
+  status: 'draft' | 'verified';
 }
 
 export interface ExtractionResult {
