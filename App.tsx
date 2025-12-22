@@ -1,9 +1,26 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, FileText, BarChart3, Plus, Trash2, X, Loader2, RefreshCw, Cloud, Edit2, Save, Search, User, Hash, Calendar, Banknote, CheckCircle2, AlertCircle, LogOut, Users } from 'lucide-center';
-// Nota: 'lucide-react' è il nome corretto del pacchetto, correggo l'errore di battitura 'lucide-center' che potrebbe causare crash
 import * as LucideIcons from 'lucide-react';
-const { LayoutDashboard: DashIcon, FileText: FileIcon, BarChart3: ChartIcon, Plus: PlusIcon, Trash2: TrashIcon, X: XIcon, Loader2: LoaderIcon, Cloud: CloudIcon, Edit2: EditIcon, Save: SaveIcon, CheckCircle2: CheckIcon, AlertCircle: AlertIcon, LogOut: LogoutIcon, Users: UsersIcon, User: UserIcon, Hash: HashIcon, Calendar: CalIcon, Banknote: BankIcon } = LucideIcons;
+
+const { 
+  LayoutDashboard: DashIcon, 
+  FileText: FileIcon, 
+  BarChart3: ChartIcon, 
+  Plus: PlusIcon, 
+  Trash2: TrashIcon, 
+  X: XIcon, 
+  Loader2: LoaderIcon, 
+  Cloud: CloudIcon, 
+  Edit2: EditIcon, 
+  Save: SaveIcon, 
+  CheckCircle2: CheckIcon, 
+  AlertCircle: AlertIcon, 
+  LogOut: LogoutIcon,
+  Search: SearchIcon,
+  Calendar: CalIcon,
+  Banknote: BankIcon,
+  Hash: HashIcon
+} = LucideIcons;
 
 import { Invoice, AppView } from './types';
 import { supabase } from './lib/supabase';
@@ -24,8 +41,6 @@ const App: React.FC = () => {
   
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
-  const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
-  const vendorInputRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const initSession = async () => {
@@ -52,7 +67,7 @@ const App: React.FC = () => {
     if (session) {
       fetchInvoices();
       const channel = supabase
-        .channel('db-changes-shared')
+        .channel('db-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => fetchInvoices())
         .subscribe();
       return () => { supabase.removeChannel(channel); };
@@ -93,6 +108,18 @@ const App: React.FC = () => {
     }
   };
 
+  const startEditing = (invoice: Invoice) => {
+    setEditForm({
+      vendor: invoice.vendor,
+      invoiceNumber: invoice.invoiceNumber,
+      date: invoice.date,
+      amount: invoice.amount,
+      currency: invoice.currency
+    });
+    setSelectedInvoice(invoice);
+    setIsEditing(true);
+  };
+
   const handleUpdateInvoice = async () => {
     if (!selectedInvoice || !editForm || !session) return;
     setIsSyncing(true);
@@ -100,11 +127,25 @@ const App: React.FC = () => {
       const updatedData = { ...editForm, status: 'verified' as const };
       const { error } = await supabase.from('invoices').update(updatedData).eq('id', selectedInvoice.id);
       if (error) throw error;
-      setSelectedInvoice({ ...selectedInvoice, ...updatedData });
+      setSelectedInvoice({ ...selectedInvoice, ...updatedData, status: 'verified' });
       setIsEditing(false);
       fetchInvoices();
     } catch (e: any) {
-      alert("Errore aggiornamento.");
+      alert("Errore durante il salvataggio.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleVerifyDirectly = async (invoice: Invoice) => {
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase.from('invoices').update({ status: 'verified' }).eq('id', invoice.id);
+      if (error) throw error;
+      setSelectedInvoice({ ...invoice, status: 'verified' });
+      fetchInvoices();
+    } catch (e: any) {
+      alert("Errore durante la verifica.");
     } finally {
       setIsSyncing(false);
     }
@@ -135,7 +176,7 @@ const App: React.FC = () => {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900 gap-4">
         <LoaderIcon className="animate-spin text-blue-500 w-12 h-12" />
-        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Sincronizzazione Cloud...</p>
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Accesso in corso...</p>
       </div>
     );
   }
@@ -154,7 +195,7 @@ const App: React.FC = () => {
           </h1>
           <div className="flex items-center gap-2 mt-1">
             <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Database Condiviso</p>
+            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cloud Sync</p>
           </div>
         </div>
 
@@ -177,7 +218,7 @@ const App: React.FC = () => {
           
           <div className="pt-4 border-t border-slate-800">
             <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-2xl border border-white/5 overflow-hidden">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 uppercase font-black text-xs">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 uppercase font-black text-[10px]">
                 {session?.user?.email?.[0]}
               </div>
               <div className="min-w-0">
@@ -200,13 +241,13 @@ const App: React.FC = () => {
           </h2>
           <div className="flex items-center gap-3 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full">
             <CloudIcon size={14} className="text-blue-400" />
-            <span className="text-xs font-bold text-blue-600">{invoices.length} Documenti</span>
+            <span className="text-xs font-bold text-blue-600">{invoices.length} File</span>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">
           {view === AppView.DASHBOARD && <Dashboard invoices={invoices} onViewAll={() => setView(AppView.INVOICES)} onInvoiceClick={setSelectedInvoice} />}
-          {view === AppView.INVOICES && <InvoiceTable invoices={invoices} onView={setSelectedInvoice} onEdit={(inv) => { setSelectedInvoice(inv); setIsEditing(true); }} onDelete={handleDeleteInvoice} />}
+          {view === AppView.INVOICES && <InvoiceTable invoices={invoices} onView={setSelectedInvoice} onEdit={startEditing} onDelete={handleDeleteInvoice} />}
           {view === AppView.REPORTS && <Reports invoices={invoices} />}
         </div>
       </main>
@@ -215,17 +256,91 @@ const App: React.FC = () => {
 
       {selectedInvoice && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-xl text-slate-900 tracking-tight">{isEditing ? 'Modifica Dati' : selectedInvoice.vendor}</h3>
-                <p className="text-xs font-medium text-slate-500">Documento n. {selectedInvoice.invoiceNumber}</p>
+          <div className="bg-white rounded-[32px] w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <div className={`p-3 rounded-2xl ${selectedInvoice.status === 'verified' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                  {selectedInvoice.status === 'verified' ? <CheckIcon size={24} /> : <AlertIcon size={24} />}
+                </div>
+                <div>
+                  <h3 className="font-bold text-xl text-slate-900 tracking-tight">
+                    {isEditing ? 'Modifica Dati' : selectedInvoice.vendor}
+                  </h3>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                    Documento {selectedInvoice.status === 'verified' ? 'Verificato' : 'Bozza'} n. {selectedInvoice.invoiceNumber}
+                  </p>
+                </div>
               </div>
-              <button onClick={() => { setSelectedInvoice(null); setIsEditing(false); }} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><XIcon size={24} /></button>
+              <div className="flex items-center gap-3">
+                {!isEditing && selectedInvoice.status === 'draft' && (
+                  <button onClick={() => handleVerifyDirectly(selectedInvoice)} className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center gap-2">
+                    <CheckIcon size={18} /> Approva Rapido
+                  </button>
+                )}
+                <button onClick={() => { setSelectedInvoice(null); setIsEditing(false); }} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-all"><XIcon size={24} /></button>
+              </div>
             </div>
+            
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              <div className="flex-1 bg-slate-100 p-6 flex justify-center">
-                 <embed src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} className="w-full h-full border-0 rounded-xl shadow-xl" type="application/pdf" />
+              {/* PDF Viewer */}
+              <div className="flex-1 bg-slate-200 p-6 flex justify-center overflow-hidden">
+                 <embed src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} className="w-full h-full border-0 rounded-2xl shadow-2xl" type="application/pdf" />
+              </div>
+
+              {/* Sidebar Dati */}
+              <div className="w-full lg:w-[400px] bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
+                <div className="flex-1">
+                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Estratti dall'AI</h4>
+                  
+                  {isEditing ? (
+                    <div className="space-y-6">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><FileIcon size={12}/> Fornitore</label>
+                        <input type="text" value={editForm.vendor} onChange={(e) => setEditForm({...editForm, vendor: e.target.value})} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><HashIcon size={12}/> Numero Fattura</label>
+                        <input type="text" value={editForm.invoiceNumber} onChange={(e) => setEditForm({...editForm, invoiceNumber: e.target.value})} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><CalIcon size={12}/> Data Emissione</label>
+                        <input type="date" value={editForm.date} onChange={(e) => setEditForm({...editForm, date: e.target.value})} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><BankIcon size={12}/> Importo ({selectedInvoice.currency})</label>
+                        <input type="number" step="0.01" value={editForm.amount} onChange={(e) => setEditForm({...editForm, amount: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-lg font-black text-blue-600 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-10">
+                      <DetailItem label="Fornitore" value={selectedInvoice.vendor} icon={<FileIcon size={14}/>} />
+                      <DetailItem label="N. Documento" value={selectedInvoice.invoiceNumber} icon={<HashIcon size={14}/>} />
+                      <DetailItem label="Data Emissione" value={new Date(selectedInvoice.date).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })} icon={<CalIcon size={14}/>} />
+                      <DetailItem label="Importo Totale" value={`${selectedInvoice.amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} ${selectedInvoice.currency}`} icon={<BankIcon size={14}/>} isAmount />
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Sidebar */}
+                <div className="pt-8 border-t border-slate-100 mt-8 space-y-3">
+                  {isEditing ? (
+                    <div className="flex gap-3">
+                      <button onClick={() => setIsEditing(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Annulla</button>
+                      <button onClick={handleUpdateInvoice} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+                        <SaveIcon size={16} /> Salva e Verifica
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button onClick={() => startEditing(selectedInvoice)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
+                        <EditIcon size={16} /> Modifica Dati
+                      </button>
+                      <button onClick={() => handleDeleteInvoice(selectedInvoice.id)} className="w-full py-4 bg-white text-red-500 border border-red-100 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-50 transition-all flex items-center justify-center gap-2">
+                        <TrashIcon size={16} /> Elimina Documento
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -234,5 +349,16 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+const DetailItem: React.FC<{ label: string; value: string; icon: React.ReactNode; isAmount?: boolean }> = ({ label, value, icon, isAmount }) => (
+  <div className="group">
+    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-2 group-hover:text-blue-500 transition-colors">
+      {icon} {label}
+    </span>
+    <span className={`${isAmount ? 'text-3xl font-black text-blue-600' : 'text-sm font-bold text-slate-800'} block break-words`}>
+      {value}
+    </span>
+  </div>
+);
 
 export default App;
