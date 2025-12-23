@@ -1,14 +1,20 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ExtractionResult } from "./types";
+import { ExtractionResult, Invoice } from "./types";
 
-export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionResult | null> => {
+export const extractInvoiceData = async (base64Pdf: string, examples: Invoice[] = []): Promise<ExtractionResult | null> => {
   try {
-    // Initialize GoogleGenAI strictly using process.env.API_KEY as per guidelines
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Costruiamo il contesto degli esempi per "insegnare" all'IA
+    let examplesContext = "";
+    if (examples.length > 0) {
+      examplesContext = "\nEcco alcuni esempi di fatture verificate precedentemente dallo stesso utente per aiutarti a capire il formato e i fornitori abituali:\n" + 
+        examples.map(ex => `- Fornitore: ${ex.vendor}, Numero: ${ex.invoiceNumber}, Data: ${ex.date}, Importo: ${ex.amount} ${ex.currency}`).join("\n");
+    }
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      // Follow the recommended contents structure with parts as per guidelines
       contents: {
         parts: [
           {
@@ -18,7 +24,7 @@ export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionR
             },
           },
           {
-            text: "Analizza questa fattura ed estrai i seguenti dati in formato JSON: numero fattura (invoiceNumber), fornitore (vendor), data della fattura in formato YYYY-MM-DD (date), importo totale numerico (amount), e valuta (currency). Sii preciso.",
+            text: `Analizza questa fattura ed estrai i seguenti dati in formato JSON: numero fattura (invoiceNumber), fornitore (vendor), data della fattura in formato YYYY-MM-DD (date), importo totale numerico (amount), e valuta (currency). Sii preciso.${examplesContext}`,
           },
         ],
       },
@@ -38,7 +44,6 @@ export const extractInvoiceData = async (base64Pdf: string): Promise<ExtractionR
       },
     });
 
-    // Directly access text property from response (not as a method)
     const text = response.text;
     if (!text) return null;
     return JSON.parse(text) as ExtractionResult;
