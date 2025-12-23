@@ -6,11 +6,13 @@ export const extractInvoiceData = async (base64Pdf: string, examples: Invoice[] 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
-    // Costruiamo il contesto degli esempi per "insegnare" all'IA
-    let examplesContext = "";
+    // Costruiamo un contesto di apprendimento più "strutturale"
+    let learningContext = "";
     if (examples.length > 0) {
-      examplesContext = "\nEcco alcuni esempi di fatture verificate precedentemente dallo stesso utente per aiutarti a capire il formato e i fornitori abituali:\n" + 
-        examples.map(ex => `- Fornitore: ${ex.vendor}, Numero: ${ex.invoiceNumber}, Data: ${ex.date}, Importo: ${ex.amount} ${ex.currency}`).join("\n");
+      learningContext = "\n### APPRENDIMENTO MODELLI UTENTE (Pattern verificati) ###\n" + 
+        "L'utente ha precedentemente verificato queste estrazioni. Usa questi dati per riconoscere i layout dei fornitori e i formati ricorrenti:\n" + 
+        examples.map(ex => `[FORNITORE: ${ex.vendor}] -> Numero: ${ex.invoiceNumber}, Data: ${ex.date}, Totale: ${ex.amount}`).join("\n") +
+        "\nSe riconosci uno di questi fornitori nel nuovo documento, applica lo stesso schema di estrazione logica.";
     }
 
     const response = await ai.models.generateContent({
@@ -24,7 +26,15 @@ export const extractInvoiceData = async (base64Pdf: string, examples: Invoice[] 
             },
           },
           {
-            text: `Analizza questa fattura ed estrai i seguenti dati in formato JSON: numero fattura (invoiceNumber), fornitore (vendor), data della fattura in formato YYYY-MM-DD (date), importo totale numerico (amount), e valuta (currency). Sii preciso.${examplesContext}`,
+            text: `Agisci come un esperto contabile. Analizza questa fattura ed estrai i dati richiesti. 
+            IMPORTANTE: Se il fornitore corrisponde a uno degli esempi forniti, segui rigorosamente quel modello di dati.${learningContext}
+
+            Estrai in JSON:
+            - invoiceNumber: numero univoco della fattura.
+            - vendor: nome del fornitore (cerca di essere coerente con i nomi negli esempi).
+            - date: data fattura (YYYY-MM-DD).
+            - amount: totale numerico.
+            - currency: valuta (es. EUR, USD).`,
           },
         ],
       },
