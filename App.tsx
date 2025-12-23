@@ -20,7 +20,8 @@ const {
   Calendar: CalIcon,
   Banknote: BankIcon,
   Hash: HashIcon,
-  ChevronRight: ChevronRightIcon
+  ChevronRight: ChevronRightIcon,
+  ChevronDown: ChevronDownIcon
 } = LucideIcons;
 
 import { Invoice, AppView } from './types';
@@ -42,6 +43,14 @@ const App: React.FC = () => {
   
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
+  const [vendorSuggestions, setVendorSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Elenco unico di tutti i fornitori presenti nel database per l'autocomplete
+  const allVendors = useMemo(() => {
+    const vendors = invoices.map(inv => inv.vendor).filter(v => v && v !== "FORNITORE SCONOSCIUTO");
+    return Array.from(new Set(vendors)).sort();
+  }, [invoices]);
 
   // Calcoliamo quante bozze rimangono oltre a quella eventualmente selezionata
   const draftInvoices = useMemo(() => invoices.filter(inv => inv.status === 'draft'), [invoices]);
@@ -120,8 +129,8 @@ const App: React.FC = () => {
 
   const startEditing = (invoice: Invoice) => {
     setEditForm({
-      vendor: invoice.vendor,
-      invoiceNumber: invoice.invoiceNumber,
+      vendor: invoice.vendor === "FORNITORE SCONOSCIUTO" ? "" : invoice.vendor,
+      invoiceNumber: invoice.invoiceNumber === "DA COMPILARE" ? "" : invoice.invoiceNumber,
       date: invoice.date,
       amount: invoice.amount,
       currency: invoice.currency
@@ -135,6 +144,7 @@ const App: React.FC = () => {
       setSelectedInvoice(nextDraft);
       setIsEditing(false);
       setEditForm({});
+      setShowSuggestions(false);
     } else {
       setSelectedInvoice(null);
     }
@@ -196,6 +206,24 @@ const App: React.FC = () => {
     setSession(null);
     setInvoices([]);
     setIsLoading(false);
+  };
+
+  const handleVendorChange = (value: string) => {
+    setEditForm({ ...editForm, vendor: value });
+    if (value.length > 1) {
+      const filtered = allVendors.filter(v => 
+        v.toLowerCase().includes(value.toLowerCase())
+      );
+      setVendorSuggestions(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectVendorSuggestion = (vendor: string) => {
+    setEditForm({ ...editForm, vendor });
+    setShowSuggestions(false);
   };
 
   if (isLoading) {
@@ -290,7 +318,7 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-bold text-xl text-slate-900 tracking-tight">
-                    {isEditing ? 'Modifica Dati' : selectedInvoice.vendor}
+                    {isEditing ? 'Revisione Dati' : selectedInvoice.vendor}
                   </h3>
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
                     Documento {selectedInvoice.status === 'verified' ? 'Verificato' : 'Bozza'} n. {selectedInvoice.invoiceNumber}
@@ -303,24 +331,55 @@ const App: React.FC = () => {
                     <CheckIcon size={18} /> Approva Rapido
                   </button>
                 )}
-                <button onClick={() => { setSelectedInvoice(null); setIsEditing(false); }} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-all"><XIcon size={24} /></button>
+                <button onClick={() => { setSelectedInvoice(null); setIsEditing(false); setShowSuggestions(false); }} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-all"><XIcon size={24} /></button>
               </div>
             </div>
             
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+              {/* PDF Viewer - Sostituito embed con iframe per selezione testo */}
               <div className="flex-1 bg-slate-200 p-6 flex justify-center overflow-hidden">
-                 <embed src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} className="w-full h-full border-0 rounded-2xl shadow-2xl" type="application/pdf" />
+                 <iframe 
+                    src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} 
+                    className="w-full h-full border-0 rounded-2xl shadow-2xl bg-white" 
+                    title="Invoice PDF Preview"
+                 />
               </div>
 
+              {/* Sidebar Dati */}
               <div className="w-full lg:w-[400px] bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
                 <div className="flex-1">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Estratti</h4>
+                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Documento</h4>
                   
                   {isEditing ? (
                     <div className="space-y-6">
-                      <div className="space-y-1.5">
+                      <div className="space-y-1.5 relative">
                         <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><FileIcon size={12}/> Fornitore</label>
-                        <input type="text" value={editForm.vendor} onChange={(e) => setEditForm({...editForm, vendor: e.target.value})} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            placeholder="Digita il nome del fornitore..."
+                            value={editForm.vendor} 
+                            onChange={(e) => handleVendorChange(e.target.value)}
+                            onFocus={() => editForm.vendor && editForm.vendor.length > 1 && setShowSuggestions(true)}
+                            className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" 
+                          />
+                          {showSuggestions && (
+                            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[60] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                               <div className="p-2 max-h-[200px] overflow-y-auto custom-scrollbar">
+                                  {vendorSuggestions.map((v, i) => (
+                                    <button 
+                                      key={i} 
+                                      onClick={() => selectVendorSuggestion(v)}
+                                      className="w-full text-left px-4 py-2.5 hover:bg-blue-50 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-between group"
+                                    >
+                                      {v}
+                                      <ChevronRightIcon size={12} className="opacity-0 group-hover:opacity-100 text-blue-500 transition-all" />
+                                    </button>
+                                  ))}
+                               </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><HashIcon size={12}/> Numero Fattura</label>
