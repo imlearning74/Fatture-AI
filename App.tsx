@@ -45,9 +45,10 @@ const App: React.FC = () => {
 
   // Calcoliamo quante bozze rimangono oltre a quella eventualmente selezionata
   const draftInvoices = useMemo(() => invoices.filter(inv => inv.status === 'draft'), [invoices]);
+  const verifiedInvoices = useMemo(() => invoices.filter(inv => inv.status === 'verified'), [invoices]);
+  
   const nextDraft = useMemo(() => {
     if (!selectedInvoice) return null;
-    // Troviamo la prima bozza che non sia quella attuale
     return draftInvoices.find(inv => inv.id !== selectedInvoice.id) || null;
   }, [draftInvoices, selectedInvoice]);
 
@@ -147,7 +148,6 @@ const App: React.FC = () => {
       const { error } = await supabase.from('invoices').update(updatedData).eq('id', selectedInvoice.id);
       if (error) throw error;
       
-      // Invece di chiudere subito, aggiorniamo lo stato locale per permettere la navigazione
       setSelectedInvoice({ ...selectedInvoice, ...updatedData, status: 'verified' });
       setIsEditing(false);
       fetchInvoices();
@@ -278,7 +278,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {isUploadOpen && <InvoiceUpload onClose={() => setIsUploadOpen(false)} onSuccess={handleAddInvoices} existingVendors={[]} />}
+      {isUploadOpen && <InvoiceUpload onClose={() => setIsUploadOpen(false)} onSuccess={handleAddInvoices} verifiedExamples={verifiedInvoices} />}
 
       {selectedInvoice && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -298,7 +298,7 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                {!isEditing && selectedInvoice.status === 'draft' && (
+                {!isEditing && selectedInvoice.status === 'draft' && selectedInvoice.vendor !== "FORNITORE SCONOSCIUTO" && (
                   <button onClick={() => handleVerifyDirectly(selectedInvoice)} className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center gap-2">
                     <CheckIcon size={18} /> Approva Rapido
                   </button>
@@ -308,15 +308,13 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              {/* PDF Viewer */}
               <div className="flex-1 bg-slate-200 p-6 flex justify-center overflow-hidden">
                  <embed src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} className="w-full h-full border-0 rounded-2xl shadow-2xl" type="application/pdf" />
               </div>
 
-              {/* Sidebar Dati */}
               <div className="w-full lg:w-[400px] bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
                 <div className="flex-1">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Estratti dall'AI</h4>
+                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Estratti</h4>
                   
                   {isEditing ? (
                     <div className="space-y-6">
@@ -347,7 +345,6 @@ const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Footer Sidebar */}
                 <div className="pt-8 border-t border-slate-100 mt-8 space-y-3">
                   {isEditing ? (
                     <div className="flex flex-col gap-3">
@@ -366,7 +363,7 @@ const App: React.FC = () => {
                       
                       {selectedInvoice.status === 'draft' && (
                         <button onClick={() => startEditing(selectedInvoice)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
-                          <EditIcon size={16} /> Modifica Dati
+                          <EditIcon size={16} /> {selectedInvoice.vendor === "FORNITORE SCONOSCIUTO" ? "Compila Manualmente" : "Modifica Dati"}
                         </button>
                       )}
 
