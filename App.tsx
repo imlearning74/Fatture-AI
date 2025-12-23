@@ -20,8 +20,7 @@ const {
   Calendar: CalIcon,
   Banknote: BankIcon,
   Hash: HashIcon,
-  ChevronRight: ChevronRightIcon,
-  ChevronDown: ChevronDownIcon
+  ChevronRight: ChevronRightIcon
 } = LucideIcons;
 
 import { Invoice, AppView } from './types';
@@ -45,14 +44,49 @@ const App: React.FC = () => {
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
   const [vendorSuggestions, setVendorSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  // Elenco unico di tutti i fornitori presenti nel database per l'autocomplete
+  // Generazione del Blob URL per il PDF (migliora l'interazione e la selezione testo)
+  const pdfUrl = useMemo(() => {
+    if (!selectedInvoice?.pdfData) return null;
+    try {
+      const binaryString = atob(selectedInvoice.pdfData);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error("Errore creazione Blob PDF:", e);
+      return null;
+    }
+  }, [selectedInvoice]);
+
+  // Pulizia del Blob URL per evitare memory leak
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
+
+  // Elenco unico di fornitori per l'autocomplete
   const allVendors = useMemo(() => {
     const vendors = invoices.map(inv => inv.vendor).filter(v => v && v !== "FORNITORE SCONOSCIUTO");
     return Array.from(new Set(vendors)).sort();
   }, [invoices]);
 
-  // Calcoliamo quante bozze rimangono oltre a quella eventualmente selezionata
+  // Gestione clic esterno per chiudere suggerimenti
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const draftInvoices = useMemo(() => invoices.filter(inv => inv.status === 'draft'), [invoices]);
   const verifiedInvoices = useMemo(() => invoices.filter(inv => inv.status === 'verified'), [invoices]);
   
@@ -72,13 +106,10 @@ const App: React.FC = () => {
         setIsLoading(false);
       }
     };
-
     initSession();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -117,7 +148,6 @@ const App: React.FC = () => {
         ...inv,
         user_id: session.user.id
       }));
-      
       const { error } = await supabase.from('invoices').insert(invoicesWithUser);
       if (error) throw new Error(error.message);
       setIsUploadOpen(false);
@@ -157,7 +187,6 @@ const App: React.FC = () => {
       const updatedData = { ...editForm, status: 'verified' as const };
       const { error } = await supabase.from('invoices').update(updatedData).eq('id', selectedInvoice.id);
       if (error) throw error;
-      
       setSelectedInvoice({ ...selectedInvoice, ...updatedData, status: 'verified' });
       setIsEditing(false);
       fetchInvoices();
@@ -187,7 +216,6 @@ const App: React.FC = () => {
       try {
         const { error } = await supabase.from('invoices').delete().eq('id', id);
         if (error) throw error;
-        
         if (nextDraft) {
           goToNextDraft();
         } else {
@@ -210,7 +238,7 @@ const App: React.FC = () => {
 
   const handleVendorChange = (value: string) => {
     setEditForm({ ...editForm, vendor: value });
-    if (value.length > 1) {
+    if (value.length >= 1) {
       const filtered = allVendors.filter(v => 
         v.toLowerCase().includes(value.toLowerCase())
       );
@@ -219,11 +247,6 @@ const App: React.FC = () => {
     } else {
       setShowSuggestions(false);
     }
-  };
-
-  const selectVendorSuggestion = (vendor: string) => {
-    setEditForm({ ...editForm, vendor });
-    setShowSuggestions(false);
   };
 
   if (isLoading) {
@@ -235,24 +258,20 @@ const App: React.FC = () => {
     );
   }
 
-  if (!session) {
-    return <Auth />;
-  }
+  if (!session) return <Auth />;
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900">
       <aside className="w-64 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-6">
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <FileIcon className="text-blue-400" />
-            InvoiceAI
+            <FileIcon className="text-blue-400" /> InvoiceAI
           </h1>
           <div className="flex items-center gap-2 mt-1">
             <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></div>
             <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cloud Sync</p>
           </div>
         </div>
-
         <nav className="flex-1 px-4 space-y-2">
           <button onClick={() => setView(AppView.DASHBOARD)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${view === AppView.DASHBOARD ? 'bg-blue-600 shadow-lg' : 'text-slate-300 hover:bg-slate-800'}`}>
             <DashIcon size={20} /> Dashboard
@@ -264,12 +283,10 @@ const App: React.FC = () => {
             <ChartIcon size={20} /> Analisi
           </button>
         </nav>
-
         <div className="p-4 space-y-3">
           <button onClick={() => setIsUploadOpen(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition shadow-lg active:scale-95">
             <PlusIcon size={20} /> Carica File
           </button>
-          
           <div className="pt-4 border-t border-slate-800">
             <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-2xl border border-white/5 overflow-hidden">
               <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 uppercase font-black text-[10px]">
@@ -298,7 +315,6 @@ const App: React.FC = () => {
             <span className="text-xs font-bold text-blue-600">{invoices.length} File</span>
           </div>
         </header>
-
         <div className="flex-1 overflow-y-auto p-8">
           {view === AppView.DASHBOARD && <Dashboard invoices={invoices} onViewAll={() => setView(AppView.INVOICES)} onInvoiceClick={setSelectedInvoice} />}
           {view === AppView.INVOICES && <InvoiceTable invoices={invoices} onView={setSelectedInvoice} onEdit={startEditing} onDelete={handleDeleteInvoice} />}
@@ -336,23 +352,28 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              {/* PDF Viewer - Sostituito embed con iframe per selezione testo */}
               <div className="flex-1 bg-slate-200 p-6 flex justify-center overflow-hidden">
-                 <iframe 
-                    src={`data:application/pdf;base64,${selectedInvoice.pdfData}`} 
+                {pdfUrl ? (
+                  <iframe 
+                    src={pdfUrl} 
                     className="w-full h-full border-0 rounded-2xl shadow-2xl bg-white" 
                     title="Invoice PDF Preview"
-                 />
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-4 text-slate-400">
+                    <LoaderIcon className="animate-spin" size={32} />
+                    <p className="text-sm font-bold uppercase tracking-widest">Caricamento Anteprima...</p>
+                  </div>
+                )}
               </div>
 
-              {/* Sidebar Dati */}
               <div className="w-full lg:w-[400px] bg-white border-l border-slate-100 p-8 flex flex-col overflow-y-auto">
                 <div className="flex-1">
                   <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Dati Documento</h4>
                   
                   {isEditing ? (
                     <div className="space-y-6">
-                      <div className="space-y-1.5 relative">
+                      <div className="space-y-1.5 relative" ref={suggestionsRef}>
                         <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><FileIcon size={12}/> Fornitore</label>
                         <div className="relative">
                           <input 
@@ -360,16 +381,19 @@ const App: React.FC = () => {
                             placeholder="Digita il nome del fornitore..."
                             value={editForm.vendor} 
                             onChange={(e) => handleVendorChange(e.target.value)}
-                            onFocus={() => editForm.vendor && editForm.vendor.length > 1 && setShowSuggestions(true)}
+                            autoComplete="off"
                             className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" 
                           />
                           {showSuggestions && (
-                            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[60] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[60] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                                <div className="p-2 max-h-[200px] overflow-y-auto custom-scrollbar">
                                   {vendorSuggestions.map((v, i) => (
                                     <button 
                                       key={i} 
-                                      onClick={() => selectVendorSuggestion(v)}
+                                      onClick={() => {
+                                        setEditForm({ ...editForm, vendor: v });
+                                        setShowSuggestions(false);
+                                      }}
                                       className="w-full text-left px-4 py-2.5 hover:bg-blue-50 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-between group"
                                     >
                                       {v}
@@ -419,19 +443,16 @@ const App: React.FC = () => {
                           Prossima Bozza <ChevronRightIcon size={16} />
                         </button>
                       )}
-                      
                       {selectedInvoice.status === 'draft' && (
                         <button onClick={() => startEditing(selectedInvoice)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
                           <EditIcon size={16} /> {selectedInvoice.vendor === "FORNITORE SCONOSCIUTO" ? "Compila Manualmente" : "Modifica Dati"}
                         </button>
                       )}
-
                       {nextDraft && (
                          <button onClick={goToNextDraft} className="w-full py-3 bg-blue-50 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-100 transition-all flex items-center justify-center gap-2">
                            Salta alla prossima bozza <ChevronRightIcon size={14} />
                          </button>
                       )}
-
                       <button onClick={() => handleDeleteInvoice(selectedInvoice.id)} className="w-full py-4 bg-white text-red-500 border border-red-100 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-50 transition-all flex items-center justify-center gap-2">
                         <TrashIcon size={16} /> Elimina Documento
                       </button>
